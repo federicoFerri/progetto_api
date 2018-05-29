@@ -1,0 +1,6 @@
+# depslib dependency file v1.0
+1527635238 source:/hdd0/progetto_api/progetto_api.c
+	<stdio.h>
+	<stdlib.h>
+	<string.h>
+
