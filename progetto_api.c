@@ -6,6 +6,7 @@
 #define TAPE_BLOCK_SIZE 100
 #define TERMINAL_ARRAY_SIZE 10
 #define TRANSITION_HASH_SIZE 20
+#define MAX_STEPS_PROCESS 0
 
 struct TapeCell {
 	char data[TAPE_BLOCK_SIZE];
@@ -32,6 +33,8 @@ struct Process {
     int state;
     int steps;
     struct TapeCell* tape;
+    struct Process* prev;
+    struct Process* next;
 };
 
 struct Transition* transitions[TRANSITION_HASH_SIZE];
@@ -41,19 +44,19 @@ int steps_limit = 0;
 /*
 Leggi dal nastro
 */
-char read_tape(struct TapeCell** tape) {
-    return (*tape)->data[(*tape)->position];
+char read_tape(struct TapeCell* tape) {
+    return tape->data[tape->position];
 }
 
 /*
 Scrivi sul nastro e spostati
 */
-void write_and_move_tape(struct TapeCell** tape, char direction, char data) {
-    (*tape)->data[(*tape)->position] = data;
+void write_and_move_tape(struct TapeCell* tape, char write_char, char direction) {
+    tape->data[tape->position] = write_char;
     switch (direction) {
         case 'L':
-            if ((*tape)->position <= 0) {
-                if ((*tape)->left == NULL) {
+            if (tape->position <= 0) {
+                if (tape->left == NULL) {
                     // alloca in memoria la nuova cella del nastro
                     struct TapeCell* new_cell = (struct TapeCell*)malloc(sizeof(struct TapeCell));
                     // inizializza la nuova cella con tutti blank
@@ -62,33 +65,33 @@ void write_and_move_tape(struct TapeCell** tape, char direction, char data) {
                     new_cell->left = NULL;
                     new_cell->position = TAPE_BLOCK_SIZE - 1;
                     // aggancia la nuova cella alle precendenti
-                    (*tape)->left = new_cell;
-                    new_cell->right = (*tape);
+                    tape->left = new_cell;
+                    new_cell->right = tape;
                     // rendi la nuova cella, la cella di default
-                    (*tape) = new_cell;
+                    tape = new_cell;
                 } else {
-                    (*tape) = (*tape)->left;
+                    (tape) = tape->left;
                 }
-            } else (*tape)->position--;
+            } else tape->position--;
         break;
         case 'S':
             // non fare nulla
         break;
         case 'R':
-            if ((*tape)->position >= TAPE_BLOCK_SIZE - 1) {
-                if ((*tape)->right == NULL) {
+            if (tape->position >= TAPE_BLOCK_SIZE - 1) {
+                if (tape->right == NULL) {
                     // uguale al caso sinistro
                     struct TapeCell* new_cell = (struct TapeCell*)malloc(sizeof(struct TapeCell));
                     for (int i = 0; i < TAPE_BLOCK_SIZE; i++) new_cell->data[i] = '_';
                     new_cell->right = NULL;
                     new_cell->position = 0;
-                    (*tape)->right = new_cell;
-                    new_cell->left = (*tape);
-                    (*tape) = new_cell;
+                    tape->right = new_cell;
+                    new_cell->left = tape;
+                    tape = new_cell;
                 } else {
-                    (*tape) = (*tape)->right;
+                    tape = tape->right;
                 }
-            } else (*tape)->position++;
+            } else tape->position++;
         break;
     }
 }
@@ -107,7 +110,7 @@ int is_state_terminal(int state) {
 Genera hash(int) da una stringa
 */
 int generate_hash(char *key) {
-	unsigned long int hashval;
+	unsigned long int hashval = 0;
 	int i = 0;
 	while (hashval < ULONG_MAX && i < strlen(key)) {
         hashval = hashval << 8;
@@ -148,6 +151,42 @@ void load_terminal_state(char* line) {
 }
 
 /*
+Copia il nastro in un nuovo nastro e restituiscilo
+*/
+struct TapeCell* make_tape_copy(struct TapeCell* source_tape) {
+    struct TapeCell* copy_tape = (struct TapeCell*)malloc(sizeof(struct TapeCell));
+    copy_tape->position = source_tape->position;
+    for (int i = 0; i < TAPE_BLOCK_SIZE; i++) copy_tape->data[i] = source_tape->data[i];
+    // copia lato sinistro nastro
+    struct TapeCell* tmp_source_tape = source_tape->left;
+    struct TapeCell* tmp_copy_tape = copy_tape;
+    while (tmp_source_tape != NULL) {
+        struct TapeCell* new_cell = (struct TapeCell*)malloc(sizeof(struct TapeCell));
+        new_cell->position = tmp_source_tape->position;
+        for (int i = 0; i < TAPE_BLOCK_SIZE; i++) new_cell->data[i] = tmp_source_tape->data[i];
+        new_cell->right = tmp_copy_tape;
+        tmp_copy_tape->left = new_cell;
+        tmp_source_tape = tmp_source_tape->left;
+        tmp_copy_tape = new_cell;
+    }
+    tmp_copy_tape->left = NULL;
+    // copia lato destro nastro
+    tmp_source_tape = source_tape->right;
+    tmp_copy_tape = copy_tape;
+    while (tmp_source_tape != NULL) {
+        struct TapeCell* new_cell = (struct TapeCell*)malloc(sizeof(struct TapeCell));
+        new_cell->position = tmp_source_tape->position;
+        for (int i = 0; i < TAPE_BLOCK_SIZE; i++) new_cell->data[i] = tmp_source_tape->data[i];
+        new_cell->left = tmp_copy_tape;
+        tmp_copy_tape->right = new_cell;
+        tmp_source_tape = tmp_source_tape->right;
+        tmp_copy_tape = new_cell;
+    }
+    tmp_copy_tape->right = NULL;
+    return copy_tape;
+}
+
+/*
 Carica la stringa da verificare nel nastro, data la linea
 */
 struct TapeCell* preload_tape(char* line) {
@@ -157,7 +196,7 @@ struct TapeCell* preload_tape(char* line) {
     struct TapeCell* curr_cell = main_cell;
     int position = 0;
     for (int c = 0; c < strlen(line) - 1; c++) {
-        if (position >= TAPE_BLOCK_SIZE - 1) {
+        if (position >= TAPE_BLOCK_SIZE) {
             struct TapeCell* new_cell = (struct TapeCell*)malloc(sizeof(struct TapeCell));
             new_cell->position = 0;
             new_cell->left = curr_cell;
@@ -165,7 +204,8 @@ struct TapeCell* preload_tape(char* line) {
             curr_cell = new_cell;
             position = 0;
         }
-        curr_cell->data[curr_cell->position] = line[c];
+        curr_cell->data[position] = line[c];
+        position++;
     }
     for (int i = position; i < TAPE_BLOCK_SIZE; i++) curr_cell->data[i] = '_';
     curr_cell->right = NULL;
@@ -173,19 +213,198 @@ struct TapeCell* preload_tape(char* line) {
 }
 
 /*
-Esegui il process
+Libera la memoria usata da un nastro
 */
-void launch_execution(char* line) {
+void print_tape(struct TapeCell* tape) {
+    struct TapeCell* tape_copy = tape;
+    while (tape_copy->left != NULL) tape_copy = tape_copy->left;
+    while (tape_copy != NULL) {
+        printf("|");
+        for (int i = 0; i < TAPE_BLOCK_SIZE; i++) {
+            if (tape_copy == tape && i == tape_copy->position) printf("\033[31;1m%c\033[0m", tape_copy->data[i]);
+            else {
+                if (i == tape_copy->position) printf("\033[32;1m%c\033[0m", tape_copy->data[i]);
+                else printf("%c", tape_copy->data[i]);
+            }
+        }
+        tape_copy = tape_copy->right;
+    }
+    printf("|\n");
+}
+
+/*
+Esegui n mosse del processo
+*/
+char run_process(struct Process* process) {
+    int start_steps = process->steps;
+    while (process->steps - start_steps < MAX_STEPS_PROCESS || MAX_STEPS_PROCESS == 0) {
+        // se i passi sono al limite o oltre, esci
+        if (process->steps >= steps_limit) {
+            return 'U';
+        }
+        // trova hash della transizione che ci serve
+        char match_char = read_tape(process->tape);
+        int start_state = process->state;
+        char key[5];
+        snprintf(key, 5,"%c%d", match_char, start_state);
+        int index = generate_hash(key);
+        // naviga le transizioni
+        struct Transition* tmp_tr = transitions[index];
+        struct Transition* first_matching_transition = NULL;
+        while (tmp_tr != NULL) {
+            if (tmp_tr->start_state == start_state && tmp_tr->match_char == match_char) {
+                // se trova una transizione verso uno stato finale, esci
+                if (is_state_terminal(tmp_tr->goto_state)) {
+                    return '1';
+                }
+                if (first_matching_transition == NULL) {
+                    //printf("first valid move %d->%d, %c->%c, %c\n", tmp_tr->start_state, tmp_tr->goto_state, tmp_tr->match_char, tmp_tr->write_char, tmp_tr->direction);
+                    // conservo la prima transizione così da poterla applicare dopo aver copiato i nastri
+                    first_matching_transition = tmp_tr;
+                } else {
+                    // qui eseguo il "fork", creando un nuovo processo
+                    struct Process* new_process = (struct Process*)malloc(sizeof(struct Process));
+                    new_process->tape = make_tape_copy(process->tape);
+                    write_and_move_tape(new_process->tape, tmp_tr->write_char, tmp_tr->direction);
+                    new_process->state = tmp_tr->goto_state;
+                    new_process->steps = process->steps + 1;
+                    // linka a precendenti processi
+                    struct Process* next = process->next;
+                    new_process->prev = process;
+                    new_process->next = next;
+                    next->prev = new_process;
+                    process->next = new_process;
+                }
+            }
+            tmp_tr = tmp_tr->next_transition;
+        }
+        // se non trova nessuna transizione valida, esci
+        if (first_matching_transition == NULL) {
+            return '0';
+        }
+        // applica la transizione
+        write_and_move_tape(process->tape, first_matching_transition->write_char, first_matching_transition->direction);
+        process->state = first_matching_transition->goto_state;
+        process->steps++;
+    }
+    // ritorna un timeout per raggiungimento MAX_STEPS_PROCESS
+    return 'T';
+}
+
+/*
+Libera la memoria usata da un nastro
+*/
+void free_tape(struct TapeCell* tape) {
+    struct TapeCell* tape_copy = tape->left;
+    while (tape_copy != NULL) {
+        struct TapeCell* tmp = tape_copy;
+        tape_copy = tape_copy->left;
+        free(tmp);
+    }
+    tape_copy = tape->right;
+    while (tape_copy != NULL) {
+        struct TapeCell* tmp = tape_copy;
+        tape_copy = tape_copy->right;
+        free(tmp);
+    }
+    free(tape);
+}
+
+/*
+Esegui il processo
+*/
+void launch_execution(struct Process* processes) {
+    int one_terminated = 0;
+    while (1) {
+        char status = run_process(processes);
+        switch (status) {
+            case '1':
+                printf("1\n");
+                struct Process* curr = processes->next;
+                while (curr->next != processes) {
+                    struct Process* tmp = curr;
+                    free_tape(tmp->tape);
+                    free(tmp);
+                    curr = curr->next;
+                }
+                free_tape(processes->tape);
+                free(processes);
+                return;
+            break;
+            case '0':
+                if (processes == processes->next) {
+                    printf("0\n");
+                    free_tape(processes->tape);
+                    free(processes);
+                    return;
+                } else {
+                    one_terminated = 1;
+                    struct Process* prev = processes->prev;
+                    struct Process* next = processes->next;
+                    prev->next = next;
+                    next->prev = prev;
+                    free_tape(processes->tape);
+                    free(processes);
+                    processes = next;
+                }
+            break;
+            case 'U':
+                if (processes == processes->next) {
+                    if (one_terminated) printf("U\n");
+                    else printf("0\n");
+                    free_tape(processes->tape);
+                    free(processes);
+                    return;
+                } else {
+                    struct Process* prev = processes->prev;
+                    struct Process* next = processes->next;
+                    prev->next = next;
+                    next->prev = prev;
+                    struct Process* tmp = processes;
+                    processes = next;
+                    free_tape(tmp->tape);
+                    free(tmp);
+                }
+            break;
+            case 'T':
+                // non fare nulla, semplicemente cambia processo
+                processes = processes->next;
+            break;
+        }
+    }
+}
+
+/*
+Crea il processo
+*/
+void create_execution(char* line) {
     if (strlen(line) > 0) {
         struct TapeCell* tape = preload_tape(line);
-        return;
-        struct Process* main_process = (struct Process*)malloc(sizeof(struct Process));
-        main_process->state = 0;
-        main_process->steps = 0;
-        main_process->tape = tape;
-        /*append to processes*/
-        struct Process* processes = main_process;
+        struct Process* processes = (struct Process*)malloc(sizeof(struct Process));
+        processes->state = 0;
+        processes->steps = 0;
+        processes->tape = tape;
+        processes->prev = processes;
+        processes->next = processes;
+        launch_execution(processes);
     }
+}
+
+/*
+Libera la memoria usata per definire transizioni, stati finali etc
+*/
+void free_static_data() {
+    // libera hash table transizioni, non uso puntatori temporanei tanto non mi importa di perdere la testa
+    for (int i = 0; i < TRANSITION_HASH_SIZE; i++) {
+        while (transitions[i] != NULL) {
+            struct Transition* tmp_tr = transitions[i];
+            transitions[i] = transitions[i]->next_transition;
+            free(tmp_tr);
+        }
+    }
+    // libera stati terminali
+    free(terminal_states->states);
+    free(terminal_states);
 }
 
 /*
@@ -228,13 +447,15 @@ void load_stdin() {
                 sscanf(line, "%d\n", &steps_limit);
             break;
             case 'r':
-                launch_execution(line);
+                create_execution(line);
             break;
         }
+        free(line);
     }
 }
 
 int main(int argc, char* argv[]) {
     load_stdin();
+    free_static_data();
     return 0;
 }
