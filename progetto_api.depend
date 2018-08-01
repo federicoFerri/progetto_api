@@ -1,5 +1,11 @@
 # depslib dependency file v1.0
-1528050954 source:/hdd0/progetto_api/progetto_api.c
+1533077690 source:/hdd0/progetto_api_2/progetto_api/progetto_api.c
+	<stdio.h>
+	<stdlib.h>
+	<string.h>
+	<limits.h>
+
+1533108779 source:/hdd0/progetto_api/progetto_api.c
 	<stdio.h>
 	<stdlib.h>
 	<string.h>

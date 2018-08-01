@@ -6,7 +6,7 @@
 #define TAPE_BLOCK_SIZE 100
 #define TERMINAL_ARRAY_SIZE 10
 #define TRANSITION_HASH_SIZE 20
-#define MAX_STEPS_PROCESS 0
+#define MAX_STEPS_PROCESS 5
 
 struct TapeCell {
 	char data[TAPE_BLOCK_SIZE];
@@ -121,36 +121,6 @@ int generate_hash(char *key) {
 }
 
 /*
-Carica transizione da file, data la linea
-*/
-void load_transition(char* line) {
-    struct Transition* new_transition = (struct Transition*)malloc(sizeof(struct Transition));
-    sscanf(line, "%d %c %c %c %d\n", &new_transition->start_state, &new_transition->match_char, &new_transition->write_char, &new_transition->direction, &new_transition->goto_state);
-    char key[5];
-    snprintf(key, 5,"%c%d", new_transition->match_char, new_transition->start_state);
-    int index = generate_hash(key);
-    new_transition->next_transition = transitions[index];
-    transitions[index] = new_transition;
-}
-
-/*
-Carica stato terminale da file, data la linea
-*/
-void load_terminal_state(char* line) {
-    if (terminal_states == NULL) {
-        struct TerminalStates* new_ts = (struct TerminalStates*)malloc(sizeof(struct TerminalStates));
-        new_ts->size = 0;
-        new_ts->states = malloc(TERMINAL_ARRAY_SIZE * sizeof(int));
-        terminal_states = new_ts;
-    }
-    if (terminal_states->size > ((terminal_states->size / TERMINAL_ARRAY_SIZE) + 1) * TERMINAL_ARRAY_SIZE) {
-        terminal_states->states = realloc(terminal_states->states, ((terminal_states->size / TERMINAL_ARRAY_SIZE) + 1) * TERMINAL_ARRAY_SIZE * sizeof(int));
-    }
-    sscanf(line, "%d\n", &terminal_states->states[terminal_states->size]);
-    terminal_states->size++;
-}
-
-/*
 Copia il nastro in un nuovo nastro e restituiscilo
 */
 struct TapeCell* make_tape_copy(struct TapeCell* source_tape) {
@@ -184,32 +154,6 @@ struct TapeCell* make_tape_copy(struct TapeCell* source_tape) {
     }
     tmp_copy_tape->right = NULL;
     return copy_tape;
-}
-
-/*
-Carica la stringa da verificare nel nastro, data la linea
-*/
-struct TapeCell* preload_tape(char* line) {
-    struct TapeCell* main_cell = (struct TapeCell*)malloc(sizeof(struct TapeCell));
-    main_cell->position = 0;
-    main_cell->left = NULL;
-    struct TapeCell* curr_cell = main_cell;
-    int position = 0;
-    for (int c = 0; c < strlen(line) - 1; c++) {
-        if (position >= TAPE_BLOCK_SIZE) {
-            struct TapeCell* new_cell = (struct TapeCell*)malloc(sizeof(struct TapeCell));
-            new_cell->position = 0;
-            new_cell->left = curr_cell;
-            curr_cell->right = new_cell;
-            curr_cell = new_cell;
-            position = 0;
-        }
-        curr_cell->data[position] = line[c];
-        position++;
-    }
-    for (int i = position; i < TAPE_BLOCK_SIZE; i++) curr_cell->data[i] = '_';
-    curr_cell->right = NULL;
-    return main_cell;
 }
 
 /*
@@ -375,22 +319,6 @@ void launch_execution(struct Process* processes) {
 }
 
 /*
-Crea il processo
-*/
-void create_execution(char* line) {
-    if (strlen(line) > 0) {
-        struct TapeCell* tape = preload_tape(line);
-        struct Process* processes = (struct Process*)malloc(sizeof(struct Process));
-        processes->state = 0;
-        processes->steps = 0;
-        processes->tape = tape;
-        processes->prev = processes;
-        processes->next = processes;
-        launch_execution(processes);
-    }
-}
-
-/*
 Libera la memoria usata per definire transizioni, stati finali etc
 */
 void free_static_data() {
@@ -408,50 +336,109 @@ void free_static_data() {
 }
 
 /*
+Carica transizione da file, data la linea
+*/
+int load_transitions() {
+    int start_state, goto_state, read_status;
+    char match_char, write_char, direction;
+    read_status = scanf("%d %c %c %c %d\n", &start_state, &match_char, &write_char, &direction, &goto_state);
+    while (read_status) {
+        struct Transition* new_transition = (struct Transition*)malloc(sizeof(struct Transition));
+        new_transition->start_state = start_state;
+        new_transition->match_char = match_char;
+        new_transition->write_char = write_char;
+        new_transition->direction = direction;
+        new_transition->goto_state = goto_state;
+        char key[5];
+        snprintf(key, 5,"%c%d", new_transition->match_char, new_transition->start_state);
+        int index = generate_hash(key);
+        new_transition->next_transition = transitions[index];
+        transitions[index] = new_transition;
+        read_status = scanf("%d %c %c %c %d\n", &start_state, &match_char, &write_char, &direction, &goto_state);
+    }
+    return 0;
+}
+
+/*
+Carica stato terminale da file, data la linea
+*/
+void load_terminal_states() {
+    int state, read_status;
+    struct TerminalStates* new_ts = (struct TerminalStates*)malloc(sizeof(struct TerminalStates));
+    new_ts->size = 0;
+    new_ts->states = malloc(TERMINAL_ARRAY_SIZE * sizeof(int));
+    terminal_states = new_ts;
+    read_status = scanf("%d\n", &state);
+    while (read_status) {
+        if (terminal_states->size > ((terminal_states->size / TERMINAL_ARRAY_SIZE) + 1) * TERMINAL_ARRAY_SIZE) {
+            terminal_states->states = realloc(terminal_states->states, ((terminal_states->size / TERMINAL_ARRAY_SIZE) + 1) * TERMINAL_ARRAY_SIZE * sizeof(int));
+        }
+        terminal_states->states[terminal_states->size] = state;
+        terminal_states->size++;
+        read_status = scanf("%d\n", &state);
+    }
+}
+
+/*
+Carica la stringa da verificare nel nastro, data la linea
+*/
+struct TapeCell* preload_tape() {
+    struct TapeCell* main_cell = (struct TapeCell*)malloc(sizeof(struct TapeCell));
+    main_cell->position = 0;
+    main_cell->left = NULL;
+    struct TapeCell* curr_cell = main_cell;
+    int position = 0;
+    char current_char;
+    while ((current_char = fgetc(stdin)) != '\n' && current_char != EOF) {
+        if (position >= TAPE_BLOCK_SIZE) {
+            struct TapeCell* new_cell = (struct TapeCell*)malloc(sizeof(struct TapeCell));
+            new_cell->position = 0;
+            new_cell->left = curr_cell;
+            curr_cell->right = new_cell;
+            curr_cell = new_cell;
+            position = 0;
+        }
+        curr_cell->data[position] = current_char;
+        position++;
+    }
+    for (int i = position; i < TAPE_BLOCK_SIZE; i++) curr_cell->data[i] = '_';
+    curr_cell->right = NULL;
+    return main_cell;
+}
+
+/*
+Crea il processo
+*/
+void create_executions() {
+    while (!feof(stdin)) {
+        struct TapeCell* tape = preload_tape();
+        struct Process* processes = (struct Process*)malloc(sizeof(struct Process));
+        processes->state = 0;
+        processes->steps = 0;
+        processes->tape = tape;
+        processes->prev = processes;
+        processes->next = processes;
+        launch_execution(processes);
+    }
+}
+
+/*
 Crea e carica il nastro con i valori da file
 */
-void load_stdin() {
+int load_stdin() {
     // inizializza le strutture dati
     for (int i = 0; i < TRANSITION_HASH_SIZE; i++) transitions[i] = NULL;
-    // inizia lettura
-    int length = 1;
-    char mode = ' ';
-    while (length > 0) {
-        char* line = NULL;
-        size_t size = 0;
-        length = getline(&line, &size, stdin);
-        if (strcmp(line, "tr\n") == 0) {
-            mode = 't';
-            continue;
-        }
-        if (strcmp(line, "acc\n") == 0) {
-            mode = 'a';
-            continue;
-        }
-        if (strcmp(line, "max\n") == 0) {
-            mode = 'm';
-            continue;
-        }
-        if (strcmp(line, "run\n") == 0) {
-            mode = 'r';
-            continue;
-        }
-        switch (mode) {
-            case 't':
-                load_transition(line);
-            break;
-            case 'a':
-                load_terminal_state(line);
-            break;
-            case 'm':
-                sscanf(line, "%d\n", &steps_limit);
-            break;
-            case 'r':
-                create_execution(line);
-            break;
-        }
-        free(line);
-    }
+    // leggi file
+    char mode[4];
+    fgets(mode,4,stdin);
+    load_transitions();
+    fgets(mode,4,stdin);
+    load_terminal_states();
+    fgets(mode,4,stdin);
+    scanf("%d\n", &steps_limit);
+    fgets(mode,4,stdin);
+    create_executions();
+    return 0;
 }
 
 int main(int argc, char* argv[]) {
