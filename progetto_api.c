@@ -6,7 +6,8 @@
 #define TAPE_BLOCK_SIZE 100
 #define TERMINAL_ARRAY_SIZE 10
 #define TRANSITION_HASH_SIZE 20
-#define MAX_STEPS_PROCESS 5
+#define MAX_STEPS_PROCESS 0
+#define DEBUG 0
 
 struct TapeCell {
 	char data[TAPE_BLOCK_SIZE];
@@ -70,7 +71,7 @@ void write_and_move_tape(struct TapeCell* tape, char write_char, char direction)
                     // rendi la nuova cella, la cella di default
                     tape = new_cell;
                 } else {
-                    (tape) = tape->left;
+                    tape = tape->left;
                 }
             } else tape->position--;
         break;
@@ -181,9 +182,13 @@ Esegui n mosse del processo
 */
 char run_process(struct Process* process) {
     int start_steps = process->steps;
-    while (process->steps - start_steps < MAX_STEPS_PROCESS || MAX_STEPS_PROCESS == 0) {
+    if (DEBUG) printf("NEW_PROCESS\n");
+    while (MAX_STEPS_PROCESS == 0 || process->steps - start_steps < MAX_STEPS_PROCESS) {
+        if (DEBUG) printf("%d", process->state);
+        if (DEBUG) print_tape(process->tape);
         // se i passi sono al limite o oltre, esci
         if (process->steps >= steps_limit) {
+            if (DEBUG) printf("||U||\n");
             return 'U';
         }
         // trova hash della transizione che ci serve
@@ -199,6 +204,7 @@ char run_process(struct Process* process) {
             if (tmp_tr->start_state == start_state && tmp_tr->match_char == match_char) {
                 // se trova una transizione verso uno stato finale, esci
                 if (is_state_terminal(tmp_tr->goto_state)) {
+                    if (DEBUG) printf("||1||\n");
                     return '1';
                 }
                 if (first_matching_transition == NULL) {
@@ -224,6 +230,7 @@ char run_process(struct Process* process) {
         }
         // se non trova nessuna transizione valida, esci
         if (first_matching_transition == NULL) {
+            if (DEBUG) printf("||0||\n");
             return '0';
         }
         // applica la transizione
@@ -232,6 +239,7 @@ char run_process(struct Process* process) {
         process->steps++;
     }
     // ritorna un timeout per raggiungimento MAX_STEPS_PROCESS
+    if (DEBUG) printf("||T||\n");
     return 'T';
 }
 
@@ -258,7 +266,7 @@ void free_tape(struct TapeCell* tape) {
 Esegui il processo
 */
 void launch_execution(struct Process* processes) {
-    int one_terminated = 0;
+    int one_stalled = 0;
     while (1) {
         char status = run_process(processes);
         switch (status) {
@@ -277,25 +285,7 @@ void launch_execution(struct Process* processes) {
             break;
             case '0':
                 if (processes == processes->next) {
-                    printf("0\n");
-                    free_tape(processes->tape);
-                    free(processes);
-                    return;
-                } else {
-                    one_terminated = 1;
-                    struct Process* prev = processes->prev;
-                    struct Process* next = processes->next;
-                    prev->next = next;
-                    next->prev = prev;
-                    free_tape(processes->tape);
-                    free(processes);
-                    processes = next;
-                }
-            break;
-            case 'U':
-                if (processes == processes->next) {
-                    if (one_terminated) printf("U\n");
-                    else printf("0\n");
+                    if (one_stalled) printf("U\n"); else printf("0\n");
                     free_tape(processes->tape);
                     free(processes);
                     return;
@@ -305,9 +295,27 @@ void launch_execution(struct Process* processes) {
                     prev->next = next;
                     next->prev = prev;
                     struct Process* tmp = processes;
-                    processes = next;
                     free_tape(tmp->tape);
                     free(tmp);
+                    processes = next;
+                }
+            break;
+            case 'U':
+                one_stalled = 1;
+                if (processes == processes->next) {
+                    printf("U\n");
+                    free_tape(processes->tape);
+                    free(processes);
+                    return;
+                } else {
+                    struct Process* prev = processes->prev;
+                    struct Process* next = processes->next;
+                    prev->next = next;
+                    next->prev = prev;
+                    struct Process* tmp = processes;
+                    free_tape(tmp->tape);
+                    free(tmp);
+                    processes = next;
                 }
             break;
             case 'T':
@@ -384,11 +392,12 @@ Carica la stringa da verificare nel nastro, data la linea
 */
 struct TapeCell* preload_tape() {
     struct TapeCell* main_cell = (struct TapeCell*)malloc(sizeof(struct TapeCell));
-    main_cell->position = 0;
+    main_cell->position = TAPE_BLOCK_SIZE / 2;
     main_cell->left = NULL;
     struct TapeCell* curr_cell = main_cell;
-    int position = 0;
+    int position = TAPE_BLOCK_SIZE / 2;
     char current_char;
+    for (int i = 0; i < TAPE_BLOCK_SIZE / 2; i++) curr_cell->data[i] = '_';
     while ((current_char = fgetc(stdin)) != '\n' && current_char != EOF) {
         if (position >= TAPE_BLOCK_SIZE) {
             struct TapeCell* new_cell = (struct TapeCell*)malloc(sizeof(struct TapeCell));
@@ -410,8 +419,10 @@ struct TapeCell* preload_tape() {
 Crea il processo
 */
 void create_executions() {
-    while (!feof(stdin)) {
+    char current_char;
+    while (!feof(stdin) && (current_char = fgetc(stdin)) != EOF && ungetc(current_char, stdin)) {
         struct TapeCell* tape = preload_tape();
+        //print_tape(tape);
         struct Process* processes = (struct Process*)malloc(sizeof(struct Process));
         processes->state = 0;
         processes->steps = 0;
@@ -425,20 +436,19 @@ void create_executions() {
 /*
 Crea e carica il nastro con i valori da file
 */
-int load_stdin() {
+void load_stdin() {
     // inizializza le strutture dati
     for (int i = 0; i < TRANSITION_HASH_SIZE; i++) transitions[i] = NULL;
     // leggi file
-    char mode[4];
-    fgets(mode,4,stdin);
+    char mode[5];
+    fgets(mode,5,stdin);
     load_transitions();
-    fgets(mode,4,stdin);
+    fgets(mode,5,stdin);
     load_terminal_states();
-    fgets(mode,4,stdin);
+    fgets(mode,5,stdin);
     scanf("%d\n", &steps_limit);
-    fgets(mode,4,stdin);
+    fgets(mode,5,stdin);
     create_executions();
-    return 0;
 }
 
 int main(int argc, char* argv[]) {
