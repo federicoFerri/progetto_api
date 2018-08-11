@@ -41,8 +41,8 @@ def run_processes():
                 if DEBUG: print('||0||')
                 break
             else:
-                if DEBUG and len(valid_transitions) > 1: print('SPLIT')
                 for vtr in valid_transitions[1:]:
+                    if DEBUG: print('SPLIT')
                     new_tape = deepcopy(cp['tape'])
                     new_tape[cp['tape_pos']] = vtr['write_char']
                     np = {'current_state': vtr['end_state'], 'tape': new_tape,
@@ -87,8 +87,8 @@ def parse_file():
                 run_processes()
                 run += 1
 
-if False and __name__ == '__main__':
-    FILE = 'problems/MindYourLeft.prob.txt'
+if True and __name__ == '__main__':
+    FILE = 'problems/ToCOrNotToC.prob.txt'
     TRANSITIONS = defaultdict(list)
     MOVES = {'R': 1, 'S': 0, 'L': -1}
     TERMINAL_STATES = []
@@ -99,7 +99,7 @@ if False and __name__ == '__main__':
     OUT_BUFFER = defaultdict(lambda: 'E')
     parse_file()
 
-if True and __name__ == '__main__':
+if False and __name__ == '__main__':
     for file in os.listdir('problems'):
         FILE = os.path.join('problems', file)
         TRANSITIONS = defaultdict(list)
