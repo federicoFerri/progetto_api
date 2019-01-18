@@ -3,10 +3,10 @@
 #include <string.h>
 #include <limits.h>
 
-#define TAPE_BLOCK_SIZE 100
-#define TERMINAL_ARRAY_SIZE 10
-#define MAX_PROCESS_STEPS 0
-#define DEBUG 0
+#define TAPE_BLOCK_SIZE 1000
+#define TERMINAL_ARRAY_SIZE 100
+#define MAX_PROCESS_STEPS 100
+#define LINEAR_THRESHOLD 5
 
 struct TapeCell {
 	char data[TAPE_BLOCK_SIZE];
@@ -145,26 +145,6 @@ struct TapeCell* make_tape_copy(struct TapeCell* source_tape) {
 }
 
 /*
-Stampa un nastro, solo debug
-*/
-void print_tape(struct TapeCell* tape) {
-    struct TapeCell* tape_copy = tape;
-    while (tape_copy->left != NULL) tape_copy = tape_copy->left;
-    while (tape_copy != NULL) {
-        printf("|");
-        for (int i = 0; i < TAPE_BLOCK_SIZE; i++) {
-            if (tape_copy == tape && i == tape_copy->position) printf("\033[31;1m%c\033[0m", tape_copy->data[i]);
-            else {
-                if (i == tape_copy->position) printf("\033[32;1m%c\033[0m", tape_copy->data[i]);
-                else printf("%c", tape_copy->data[i]);
-            }
-        }
-        tape_copy = tape_copy->right;
-    }
-    printf("|\n");
-}
-
-/*
 Libera la memoria usata da un nastro
 */
 void free_tape(struct TapeCell* tape) {
@@ -191,15 +171,13 @@ void run_process(struct Process* process) {
     char match_char;
     int start_steps;
     int one_stalled = 0;
+    int max_process_steps;
+    int concurrent_executions = 0;
     while (1) {
         start_steps = process->steps;
-        if (DEBUG) printf("NEW_PROCESS\n");
-        while (MAX_PROCESS_STEPS == 0 || process->steps - start_steps < MAX_PROCESS_STEPS) {
-            if (DEBUG) printf("%d", process->state);
-            if (DEBUG) print_tape(process->tape);
+        while (concurrent_executions < LINEAR_THRESHOLD || process->steps - start_steps < MAX_PROCESS_STEPS) {
             // se i passi sono al limite o oltre, esci
             if (is_state_terminal(process->state)) {
-                if (DEBUG) printf("||1||\n");
                 printf("1\n");
                 struct Process* curr = process->next;
                 while (curr->next != process) {
@@ -214,7 +192,6 @@ void run_process(struct Process* process) {
             }
             if (process->steps >= steps_limit) {
                 one_stalled = 1;
-                if (DEBUG) printf("||U||\n");
                 if (process == process->next) {
                     printf("U\n");
                     free_tape(process->tape);
@@ -246,7 +223,6 @@ void run_process(struct Process* process) {
                     // conservo la prima transizione così da poterla applicare dopo aver copiato i nastri
                     first_matching_transition = available_transitions;
                 } else {
-                    if (DEBUG) printf("SPLIT\n");
                     // qui eseguo il "fork", creando un nuovo processo
                     struct Process* new_process = (struct Process*)malloc(sizeof(struct Process));
                     new_process->tape = make_tape_copy(process->tape);
@@ -259,12 +235,12 @@ void run_process(struct Process* process) {
                     new_process->next = next;
                     next->prev = new_process;
                     process->next = new_process;
+                    concurrent_executions++;
                 }
                 available_transitions = available_transitions->next_transition;
             }
             // se non trova nessuna transizione valida, esci
             if (first_matching_transition == NULL) {
-                if (DEBUG) printf("||0||\n");
                 if (process == process->next) {
                     if (one_stalled) printf("U\n"); else printf("0\n");
                     free_tape(process->tape);
@@ -290,25 +266,6 @@ void run_process(struct Process* process) {
         // ritorna un timeout per raggiungimento MAX_STEPS_PROCESS
         process = process->next;
     }
-}
-
-void print_transitions() {
-    int total_transitions = 0;
-    printf("min_state %d max_state %d\n", min_state, max_state);
-    printf("min_char %c max_char %c\n", min_char, max_char);
-    printf("%dx%d\n", max_state - min_state + 1, max_char - min_char + 1);
-    for (int i = 0; i < (max_state - min_state + 1); i++) {
-        for (int j = 0; j < (max_char - min_char + 1); j++) {
-            if (transitions[i][j] != NULL) printf("cell %d %c\n", i + min_state, j + min_char);
-            struct Transition* tmp_tr = transitions[i][j];
-            while (tmp_tr != NULL) {
-                printf("%d %c %c %c %d\n", tmp_tr->start_state, tmp_tr->match_char, tmp_tr->write_char, tmp_tr->direction, tmp_tr->goto_state);
-                total_transitions++;
-                tmp_tr = tmp_tr->next_transition;
-            }
-        }
-    }
-    printf("total of %d transitions\n", total_transitions);
 }
 
 /*
